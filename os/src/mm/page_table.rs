@@ -1,5 +1,7 @@
 //! Implementation of [`PageTableEntry`] and [`PageTable`].
 
+use crate::syscall::{TaskInfo, TimeVal};
+
 use super::{frame_alloc, FrameTracker, PhysPageNum, StepByOne, VirtAddr, VirtPageNum};
 use alloc::vec;
 use alloc::vec::Vec;
@@ -8,13 +10,21 @@ use bitflags::*;
 bitflags! {
     /// page table entry flags
     pub struct PTEFlags: u8 {
+        ///
         const V = 1 << 0;
+        ///
         const R = 1 << 1;
+        ///
         const W = 1 << 2;
+        ///
         const X = 1 << 3;
+        ///
         const U = 1 << 4;
+        ///
         const G = 1 << 5;
+        ///
         const A = 1 << 6;
+        ///
         const D = 1 << 7;
     }
 }
@@ -127,14 +137,14 @@ impl PageTable {
     }
     /// set the map between virtual page number and physical page number
     #[allow(unused)]
-    pub fn map(&mut self, vpn: VirtPageNum, ppn: PhysPageNum, flags: PTEFlags) {
+    pub fn map(&mut self, vpn: VirtPageNum, ppn: PhysPageNum, flags: PTEFlags){
         let pte = self.find_pte_create(vpn).unwrap();
         assert!(!pte.is_valid(), "vpn {:?} is mapped before mapping", vpn);
         *pte = PageTableEntry::new(ppn, flags | PTEFlags::V);
     }
     /// remove the map between virtual page number and physical page number
     #[allow(unused)]
-    pub fn unmap(&mut self, vpn: VirtPageNum) {
+    pub fn unmap(&mut self, vpn: VirtPageNum){
         let pte = self.find_pte(vpn).unwrap();
         assert!(pte.is_valid(), "vpn {:?} is invalid before unmapping", vpn);
         *pte = PageTableEntry::empty();
@@ -171,3 +181,30 @@ pub fn translated_byte_buffer(token: usize, ptr: *const u8, len: usize) -> Vec<&
     }
     v
 }
+
+/// 
+pub fn get_pa(token: usize,va:usize) -> usize{
+    let pt = PageTable::from_token(token);
+    let vpn = VirtPageNum::from(VirtAddr::from(va).floor());
+    let ppn = pt.translate(vpn).unwrap().ppn();
+    let pa_base = ppn.0 << 12;
+    let pa_off = va & ((1<<12)-1);
+    let pa = pa_base | pa_off;
+    pa
+}
+
+
+///
+pub fn translated_timeval(token:usize,ptr: *mut TimeVal) -> *mut TimeVal{
+    let va = ptr as usize;
+    let addr = get_pa(token, va);
+    addr as *mut TimeVal
+}
+
+///
+pub fn translated_taskinfo(token:usize,ptr: *mut TaskInfo) -> *mut TaskInfo{
+    let va = ptr as usize;
+    let addr = get_pa(token, va);
+    addr as *mut TaskInfo
+}
+
