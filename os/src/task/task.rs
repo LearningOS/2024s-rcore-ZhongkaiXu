@@ -1,7 +1,7 @@
 //! Types related to task management & Functions for completely changing TCB
 use super::TaskContext;
 use super::{kstack_alloc, pid_alloc, KernelStack, PidHandle};
-use crate::config::TRAP_CONTEXT_BASE;
+use crate::config::{MAX_SYSCALL_NUM, TRAP_CONTEXT_BASE};
 use crate::mm::{MemorySet, PhysPageNum, VirtAddr, KERNEL_SPACE};
 use crate::sync::UPSafeCell;
 use crate::trap::{trap_handler, TrapContext};
@@ -68,6 +68,13 @@ pub struct TaskControlBlockInner {
 
     /// Program break
     pub program_brk: usize,
+
+    
+    /// start time
+    pub start_time:usize,
+
+    /// syscall_times
+    pub syscall_times:[u32;MAX_SYSCALL_NUM],
 }
 
 impl TaskControlBlockInner {
@@ -118,6 +125,8 @@ impl TaskControlBlock {
                     exit_code: 0,
                     heap_bottom: user_sp,
                     program_brk: user_sp,
+                    start_time:0,
+                    syscall_times:[0;MAX_SYSCALL_NUM],
                 })
             },
         };
@@ -191,6 +200,8 @@ impl TaskControlBlock {
                     exit_code: 0,
                     heap_bottom: parent_inner.heap_bottom,
                     program_brk: parent_inner.program_brk,
+                    start_time:0,
+                    syscall_times:[0;MAX_SYSCALL_NUM],
                 })
             },
         });
@@ -209,6 +220,24 @@ impl TaskControlBlock {
     /// get pid of process
     pub fn getpid(&self) -> usize {
         self.pid.0
+    }
+    
+    /// add syscall times to current task
+    pub fn add_syscall_times(&self,id:usize){
+        let mut inner = self.inner_exclusive_access();
+        inner.syscall_times[id] += 1;
+    }
+
+    /// get_syscall times
+    pub fn get_syscall_times(&self) -> [u32;MAX_SYSCALL_NUM]{
+        let inner = self.inner_exclusive_access();
+        inner.syscall_times.clone()
+    }
+
+    /// get start time
+    pub fn get_start_time(&self) -> usize{
+        let inner = self.inner_exclusive_access();
+        inner.start_time
     }
 
     /// change the location of the program break. return None if failed.
@@ -235,6 +264,16 @@ impl TaskControlBlock {
         } else {
             None
         }
+    }
+
+    /// mmap
+    pub fn mmap(&self,start:usize,len:usize,prot:usize) -> isize{
+        self.inner_exclusive_access().memory_set.mmap(start, len, prot)
+    }
+    
+    /// unmap
+    pub fn unmap(&self,start:usize,len:usize) -> isize{
+        self.inner_exclusive_access().memory_set.unmmap(start, len)
     }
 }
 

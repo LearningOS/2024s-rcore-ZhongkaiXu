@@ -32,7 +32,7 @@ pub use context::TaskContext;
 pub use id::{kstack_alloc, pid_alloc, KernelStack, PidHandle};
 pub use manager::add_task;
 pub use processor::{
-    current_task, current_trap_cx, current_user_token, run_tasks, schedule, take_current_task,
+    current_task, current_trap_cx, current_user_token, run_tasks, schedule, take_current_task,add_syscall_times,get_syscall_times,get_start_time,
     Processor,
 };
 /// Suspend the current 'Running' task and run the next task in task list.
@@ -114,4 +114,14 @@ lazy_static! {
 ///Add init process to the manager
 pub fn add_initproc() {
     add_task(INITPROC.clone());
+}
+
+/// cur mmap
+pub fn task_mmap(start:usize,len:usize,prot:usize) -> isize{
+    current_task().unwrap().mmap(start, len, prot)
+}
+
+/// cur unmap
+pub fn task_unmap(start:usize,len:usize) -> isize{
+    current_task().unwrap().unmap(start, len)
 }
