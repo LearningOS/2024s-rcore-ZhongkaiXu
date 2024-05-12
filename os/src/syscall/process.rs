@@ -182,7 +182,7 @@ pub fn sys_spawn(_path: *const u8) -> isize {
 
     if let Some(task) = current_task(){
         let mut inner = task.inner_exclusive_access();
-        let path = translated_str(current_user_token(), _path);
+        let path = translated_str(inner.memory_set.token(), _path);
         if let Some(data) = get_app_data_by_name(&path){
             let child_tcb = Arc::new(TaskControlBlock::new(data));
             let mut child_inner = child_tcb.inner_exclusive_access();
@@ -212,5 +212,5 @@ pub fn sys_set_priority(_prio: isize) -> isize {
     }
 
     set_priority(_prio as usize);
-    0
+    _prio
 }
