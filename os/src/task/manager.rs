@@ -23,6 +23,12 @@ impl TaskManager {
     }
     /// Take a process out of the ready queue
     pub fn fetch(&mut self) -> Option<Arc<TaskControlBlock>> {
+        self.ready_queue.make_contiguous().sort_by(|a,b|{
+            let inner_a = a.inner_exclusive_access();
+            let inner_b = b.inner_exclusive_access();
+            inner_a.stride.cmp(&inner_b.stride)
+        });
+
         self.ready_queue.pop_front()
     }
 }

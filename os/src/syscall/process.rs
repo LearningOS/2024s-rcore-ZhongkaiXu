@@ -6,7 +6,7 @@ use crate::{
     loader::get_app_data_by_name,
     mm::{translated_refmut, translated_str},
     task::{
-        add_task, current_task, current_user_token, exit_current_and_run_next, get_start_time, get_syscall_times, suspend_current_and_run_next, task_mmap, task_unmap, TaskStatus
+        add_task, current_task, current_user_token, exit_current_and_run_next, get_start_time, get_syscall_times, set_priority, suspend_current_and_run_next, task_mmap, task_unmap, TaskControlBlock, TaskStatus
     }, timer::{get_time_ms, get_time_us},
 };
 
@@ -176,17 +176,41 @@ pub fn sys_sbrk(size: i32) -> isize {
 /// HINT: fork + exec =/= spawn
 pub fn sys_spawn(_path: *const u8) -> isize {
     trace!(
-        "kernel:pid[{}] sys_spawn NOT IMPLEMENTED",
+        "kernel:pid[{}] sys_spawn IMPLEMENTED",
         current_task().unwrap().pid.0
     );
-    -1
+
+    if let Some(task) = current_task(){
+        let mut inner = task.inner_exclusive_access();
+        let path = translated_str(current_user_token(), _path);
+        if let Some(data) = get_app_data_by_name(&path){
+            let child_tcb = Arc::new(TaskControlBlock::new(data));
+            let mut child_inner = child_tcb.inner_exclusive_access();
+            child_inner.parent=Some(Arc::downgrade(&task));
+            inner.children.push(child_tcb.clone());
+            add_task(child_tcb.clone());
+            return child_tcb.pid.0 as isize;
+        }
+        else{
+            return -1;
+        }
+    }else{
+        return -1;
+    }
+
 }
 
 // YOUR JOB: Set task priority.
 pub fn sys_set_priority(_prio: isize) -> isize {
     trace!(
-        "kernel:pid[{}] sys_set_priority NOT IMPLEMENTED",
+        "kernel:pid[{}] sys_set_priority IMPLEMENTED",
         current_task().unwrap().pid.0
     );
-    -1
+    
+    if _prio<=1{
+        return -1;
+    }
+
+    set_priority(_prio as usize);
+    0
 }

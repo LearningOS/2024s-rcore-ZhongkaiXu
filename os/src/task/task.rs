@@ -1,7 +1,7 @@
 //! Types related to task management & Functions for completely changing TCB
 use super::TaskContext;
 use super::{kstack_alloc, pid_alloc, KernelStack, PidHandle};
-use crate::config::{MAX_SYSCALL_NUM, TRAP_CONTEXT_BASE};
+use crate::config::{BIG_STRIDE, MAX_SYSCALL_NUM, TRAP_CONTEXT_BASE};
 use crate::mm::{MemorySet, PhysPageNum, VirtAddr, KERNEL_SPACE};
 use crate::sync::UPSafeCell;
 use crate::trap::{trap_handler, TrapContext};
@@ -75,6 +75,12 @@ pub struct TaskControlBlockInner {
 
     /// syscall_times
     pub syscall_times:[u32;MAX_SYSCALL_NUM],
+
+    /// stride
+    pub stride:usize,
+
+    /// level
+    pub level:usize,
 }
 
 impl TaskControlBlockInner {
@@ -91,6 +97,9 @@ impl TaskControlBlockInner {
     }
     pub fn is_zombie(&self) -> bool {
         self.get_status() == TaskStatus::Zombie
+    }
+    pub fn update_stride(&mut self){
+        self.stride += BIG_STRIDE / self.level;
     }
 }
 
@@ -127,6 +136,8 @@ impl TaskControlBlock {
                     program_brk: user_sp,
                     start_time:0,
                     syscall_times:[0;MAX_SYSCALL_NUM],
+                    stride:0,
+                    level:16,
                 })
             },
         };
@@ -202,6 +213,8 @@ impl TaskControlBlock {
                     program_brk: parent_inner.program_brk,
                     start_time:0,
                     syscall_times:[0;MAX_SYSCALL_NUM],
+                    stride:0,
+                    level:16,
                 })
             },
         });
@@ -240,6 +253,12 @@ impl TaskControlBlock {
         inner.start_time
     }
 
+    /// update stride
+    pub fn update_stride(&self){
+        let mut inner = self.inner_exclusive_access();
+        inner.update_stride();
+    }
+
     /// change the location of the program break. return None if failed.
     pub fn change_program_brk(&self, size: i32) -> Option<usize> {
         let mut inner = self.inner_exclusive_access();
@@ -274,6 +293,11 @@ impl TaskControlBlock {
     /// unmap
     pub fn unmap(&self,start:usize,len:usize) -> isize{
         self.inner_exclusive_access().memory_set.unmmap(start, len)
+    }
+
+    /// set priority
+    pub fn set_level(&self,level:usize){
+        self.inner_exclusive_access().level=level;
     }
 }
 

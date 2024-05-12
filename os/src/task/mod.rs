@@ -125,3 +125,8 @@ pub fn task_mmap(start:usize,len:usize,prot:usize) -> isize{
 pub fn task_unmap(start:usize,len:usize) -> isize{
     current_task().unwrap().unmap(start, len)
 }
+
+/// set priority
+pub fn set_priority(level:usize){
+    current_task().unwrap().set_level(level);
+}
