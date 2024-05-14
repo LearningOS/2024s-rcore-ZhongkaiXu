@@ -1,7 +1,7 @@
 //! Types related to task management & Functions for completely changing TCB
 use super::TaskContext;
 use super::{kstack_alloc, pid_alloc, KernelStack, PidHandle};
-use crate::config::TRAP_CONTEXT_BASE;
+use crate::config::{BIG_STRIDE, MAX_SYSCALL_NUM, TRAP_CONTEXT_BASE};
 use crate::fs::{File, Stdin, Stdout};
 use crate::mm::{MemorySet, PhysPageNum, VirtAddr, KERNEL_SPACE};
 use crate::sync::UPSafeCell;
@@ -71,6 +71,18 @@ pub struct TaskControlBlockInner {
 
     /// Program break
     pub program_brk: usize,
+
+    ///
+    pub start_time:usize,
+
+    ///
+    pub syscall_times:[u32;MAX_SYSCALL_NUM],
+
+    ///
+    pub stride:usize,
+
+    ///
+    pub level:usize,
 }
 
 impl TaskControlBlockInner {
@@ -93,6 +105,9 @@ impl TaskControlBlockInner {
             self.fd_table.push(None);
             self.fd_table.len() - 1
         }
+    }
+    pub fn update_stride(&mut self){
+        self.stride += BIG_STRIDE / self.level;
     }
 }
 
@@ -135,6 +150,10 @@ impl TaskControlBlock {
                     ],
                     heap_bottom: user_sp,
                     program_brk: user_sp,
+                    start_time:0,
+                    syscall_times:[0;MAX_SYSCALL_NUM],
+                    stride:0,
+                    level:16,
                 })
             },
         };
@@ -216,6 +235,10 @@ impl TaskControlBlock {
                     fd_table: new_fd_table,
                     heap_bottom: parent_inner.heap_bottom,
                     program_brk: parent_inner.program_brk,
+                    start_time:0,
+                    syscall_times:[0;MAX_SYSCALL_NUM],
+                    stride:0,
+                    level:16,
                 })
             },
         });
@@ -260,6 +283,45 @@ impl TaskControlBlock {
         } else {
             None
         }
+    }
+
+    /// mmap
+    pub fn mmap(&self,start:usize,len:usize,prot:usize) -> isize{
+        self.inner_exclusive_access().memory_set.mmap(start, len, prot)
+    }
+    
+    /// unmap
+    pub fn unmap(&self,start:usize,len:usize) -> isize{
+        self.inner_exclusive_access().memory_set.unmmap(start, len)
+    }
+
+    /// set priority
+    pub fn set_level(&self,level:usize){
+        self.inner_exclusive_access().level=level;
+    }
+
+    /// add syscall times to current task
+    pub fn add_syscall_times(&self,id:usize){
+        let mut inner = self.inner_exclusive_access();
+        inner.syscall_times[id] += 1;
+    }
+
+    /// get_syscall times
+    pub fn get_syscall_times(&self) -> [u32;MAX_SYSCALL_NUM]{
+        let inner = self.inner_exclusive_access();
+        inner.syscall_times.clone()
+    }
+
+    /// get start time
+    pub fn get_start_time(&self) -> usize{
+        let inner = self.inner_exclusive_access();
+        inner.start_time
+    }
+
+    /// update stride
+    pub fn update_stride(&self){
+        let mut inner = self.inner_exclusive_access();
+        inner.update_stride();
     }
 }
 

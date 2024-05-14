@@ -7,6 +7,7 @@
 use super::__switch;
 use super::{fetch_task, TaskStatus};
 use super::{TaskContext, TaskControlBlock};
+use crate::config::MAX_SYSCALL_NUM;
 use crate::sync::UPSafeCell;
 use crate::trap::TrapContext;
 use alloc::sync::Arc;
@@ -108,4 +109,22 @@ pub fn schedule(switched_task_cx_ptr: *mut TaskContext) {
     unsafe {
         __switch(switched_task_cx_ptr, idle_task_cx_ptr);
     }
+}
+
+/// add syscall times to current task
+pub fn add_syscall_times(id:usize){
+    let cur_task = PROCESSOR.exclusive_access().current().unwrap();
+    cur_task.add_syscall_times(id);
+}
+
+/// get syscall times array
+pub fn get_syscall_times() -> [u32;MAX_SYSCALL_NUM]{
+    let cur_task = PROCESSOR.exclusive_access().current().unwrap();
+    cur_task.get_syscall_times()
+}
+
+/// current start time
+pub fn get_start_time() -> usize{
+    let cur = PROCESSOR.exclusive_access().current().unwrap();
+    cur.get_start_time()
 }

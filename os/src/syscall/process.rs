@@ -7,9 +7,8 @@ use crate::{
     fs::{open_file, OpenFlags},
     mm::{translated_refmut, translated_str},
     task::{
-        add_task, current_task, current_user_token, exit_current_and_run_next,
-        suspend_current_and_run_next, TaskStatus,
-    },
+        add_task, current_task, current_user_token, exit_current_and_run_next, get_start_time, get_syscall_times, set_priority, suspend_current_and_run_next, task_mmap, task_unmap, TaskControlBlock, TaskStatus
+    }, timer::{get_time_ms, get_time_us},
 };
 
 #[repr(C)]
@@ -122,36 +121,46 @@ pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
         "kernel:pid[{}] sys_get_time NOT IMPLEMENTED",
         current_task().unwrap().pid.0
     );
-    -1
+    let us = get_time_us();
+    (*translated_refmut(current_user_token(), _ts)) = TimeVal{
+        sec : us / 1000000,
+        usec: us % 1000000,
+    };
+    0
 }
 
 /// YOUR JOB: Finish sys_task_info to pass testcases
 /// HINT: You might reimplement it with virtual memory management.
 /// HINT: What if [`TaskInfo`] is splitted by two pages ?
-pub fn sys_task_info(_ti: *mut TaskInfo) -> isize {
+pub fn sys_task_info(ti: *mut TaskInfo) -> isize {
     trace!(
-        "kernel:pid[{}] sys_task_info NOT IMPLEMENTED",
+        "kernel:pid[{}] sys_task_info IMPLEMENTED",
         current_task().unwrap().pid.0
     );
-    -1
+    (*translated_refmut(current_user_token(), ti))=TaskInfo{
+        status:TaskStatus::Running,
+        syscall_times:get_syscall_times(),
+        time:get_time_ms()-get_start_time(),
+    };
+    0
 }
 
 /// YOUR JOB: Implement mmap.
-pub fn sys_mmap(_start: usize, _len: usize, _port: usize) -> isize {
+pub fn sys_mmap(start: usize, len: usize, port: usize) -> isize {
     trace!(
-        "kernel:pid[{}] sys_mmap NOT IMPLEMENTED",
+        "kernel:pid[{}] sys_mmap IMPLEMENTED",
         current_task().unwrap().pid.0
     );
-    -1
+    task_mmap(start, len, port)
 }
 
 /// YOUR JOB: Implement munmap.
-pub fn sys_munmap(_start: usize, _len: usize) -> isize {
+pub fn sys_munmap(start: usize, len: usize) -> isize {
     trace!(
-        "kernel:pid[{}] sys_munmap NOT IMPLEMENTED",
+        "kernel:pid[{}] sys_munmap IMPLEMENTED",
         current_task().unwrap().pid.0
     );
-    -1
+    task_unmap(start, len)
 }
 
 /// change data segment size
@@ -168,17 +177,44 @@ pub fn sys_sbrk(size: i32) -> isize {
 /// HINT: fork + exec =/= spawn
 pub fn sys_spawn(_path: *const u8) -> isize {
     trace!(
-        "kernel:pid[{}] sys_spawn NOT IMPLEMENTED",
+        "kernel:pid[{}] sys_spawn IMPLEMENTED",
         current_task().unwrap().pid.0
     );
-    -1
+
+    if let Some(task) = current_task(){
+        let mut inner = task.inner_exclusive_access();
+        let path = translated_str(inner.memory_set.token(), _path);
+        if let Some(inode) = open_file(&path,OpenFlags::RDONLY){
+            // 获取数据的方式改变了 其他一样
+            let data = inode.read_all();
+            let data = data.as_slice();
+            let child_tcb = Arc::new(TaskControlBlock::new(data));
+            let mut child_inner = child_tcb.inner_exclusive_access();
+            child_inner.parent=Some(Arc::downgrade(&task));
+            inner.children.push(child_tcb.clone());
+            add_task(child_tcb.clone());
+            return child_tcb.pid.0 as isize;
+        }
+        else{
+            return -1;
+        }
+    }else{
+        return -1;
+    }
+
 }
 
 // YOUR JOB: Set task priority.
 pub fn sys_set_priority(_prio: isize) -> isize {
     trace!(
-        "kernel:pid[{}] sys_set_priority NOT IMPLEMENTED",
+        "kernel:pid[{}] sys_set_priority IMPLEMENTED",
         current_task().unwrap().pid.0
     );
-    -1
+    
+    if _prio<=1{
+        return -1;
+    }
+
+    set_priority(_prio as usize);
+    _prio
 }

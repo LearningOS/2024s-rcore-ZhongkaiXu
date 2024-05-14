@@ -20,6 +20,10 @@ pub struct EasyFileSystem {
 type DataBlock = [u8; BLOCK_SZ];
 /// An easy fs over a block device
 impl EasyFileSystem {
+    ///
+    pub fn get_start_inode_blk_id(&self) -> u32{
+        self.inode_area_start_block
+    }
     /// A data block of block size
     pub fn create(
         block_device: Arc<dyn BlockDevice>,

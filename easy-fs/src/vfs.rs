@@ -183,4 +183,123 @@ impl Inode {
         });
         block_cache_sync_all();
     }
+
+    ///
+    pub fn linkat(&self,old_name:&str, new_name: &str) -> isize{
+        let mut fs = self.fs.lock();
+        
+        // 通过这里的根节点 找每个目录项的名字
+        let old_node_id = self.read_disk_inode(|node| self.find_inode_id(old_name, node));
+
+        if old_node_id.is_none(){
+            return -1;
+        }
+        let old_node_id = old_node_id.unwrap();
+
+        self.modify_disk_inode(|root_inode| {
+            // append file in the dirent
+            let file_count = (root_inode.size as usize) / DIRENT_SZ;
+            let new_size = (file_count + 1) * DIRENT_SZ;
+            // increase size
+            self.increase_size(new_size as u32, root_inode, &mut fs);
+            // write dirent
+            let dirent = DirEntry::new(new_name, old_node_id);
+            root_inode.write_at(
+                file_count * DIRENT_SZ,
+                dirent.as_bytes(),
+                &self.block_device,
+            );
+        });
+
+
+        let (block_id, block_offset) = fs.get_disk_inode_pos(old_node_id);
+
+        let node = Self{
+            block_id:block_id as _,
+            block_offset:block_offset,
+            fs:self.fs.clone(),
+            block_device:self.block_device.clone()
+        };
+
+        node.modify_disk_inode(|disk_inode| disk_inode.add_ref());
+
+        block_cache_sync_all();
+        0
+    }
+
+    ///
+    pub fn remove_from_disk_inode(&self,name:&str,disk_inode: &mut DiskInode) -> Option<u32>{
+        assert!(disk_inode.is_dir());
+        let file_count = (disk_inode.size as usize) / DIRENT_SZ;
+        let mut dirent = DirEntry::empty();
+        for i in 0..file_count {
+            assert_eq!(
+                disk_inode.read_at(DIRENT_SZ * i, dirent.as_bytes_mut(), &self.block_device,),
+                DIRENT_SZ,
+            );
+            if dirent.name() == name {
+                let ret = Some(dirent.inode_id());
+                if i == file_count-1{
+                    disk_inode.size-=1;
+                }else{
+                    disk_inode.read_at((file_count-1) * DIRENT_SZ, dirent.as_bytes_mut(),&self.block_device);
+                    disk_inode.write_at(i * DIRENT_SZ, dirent.as_bytes(), &self.block_device);
+                    disk_inode.size-=1;
+                }
+                return ret;
+            }
+        }
+
+        None
+    }
+
+    ///
+    pub fn unlinkat(&self,name:&str) -> isize{
+        let mut fs = self.fs.lock();
+        
+        let inode = self.modify_disk_inode(|disk_inode| self.remove_from_disk_inode(name,disk_inode));
+
+        if inode.is_none(){
+            return -1;
+        }
+
+        let inode = inode.unwrap();
+
+        let (block_id, block_offset) = fs.get_disk_inode_pos(inode);
+
+        let node = Self{
+            block_id:block_id as _,
+            block_offset:block_offset,
+            fs:self.fs.clone(),
+            block_device:self.block_device.clone(),
+        };
+
+        node.modify_disk_inode(|disk_inode| {
+            disk_inode.sub_ref();
+            if disk_inode.ref_is_zero(){
+                let should_clear = disk_inode.clear_size(&self.block_device); // 只会返回要清理的块
+                for blk in should_clear.into_iter(){
+                    fs.dealloc_data(blk);
+                }
+            }
+        });
+
+        block_cache_sync_all();
+        0
+    }
+
+    ///
+    pub fn get_stat_nlink(&self) -> usize{
+        self.read_disk_inode(|disk_inode| disk_inode.stat_nlink())
+    }
+    ///
+    pub fn get_stat_mode(&self) -> usize{
+        self.read_disk_inode(|d| d.stat_mode())
+    }
+    ///
+    pub fn get_stat_ino(&self) -> usize{
+        let fs = self.fs.lock();
+        let start_blk = fs.get_start_inode_blk_id();
+        (self.block_id - (start_blk as usize)) * 4 + (self.block_offset / 128)
+    }
 }

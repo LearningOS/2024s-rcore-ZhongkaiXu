@@ -1,6 +1,6 @@
 //! File and filesystem-related syscalls
-use crate::fs::{open_file, OpenFlags, Stat};
-use crate::mm::{translated_byte_buffer, translated_str, UserBuffer};
+use crate::fs::{linkat, open_file, unlinkat, OpenFlags, Stat};
+use crate::mm::{translated_byte_buffer, translated_refmut, translated_str, UserBuffer};
 use crate::task::{current_task, current_user_token};
 
 pub fn sys_write(fd: usize, buf: *const u8, len: usize) -> isize {
@@ -81,7 +81,29 @@ pub fn sys_fstat(_fd: usize, _st: *mut Stat) -> isize {
         "kernel:pid[{}] sys_fstat NOT IMPLEMENTED",
         current_task().unwrap().pid.0
     );
-    -1
+    
+    
+
+    let current_task = current_task();
+    if current_task.is_none(){
+        return -1;
+    }
+    let current_task = current_task.unwrap();
+    let inner = current_task.inner_exclusive_access();
+    let st = translated_refmut(inner.memory_set.token(), _st);
+    let fd_table_len = inner.fd_table.len();
+
+    if _fd >=fd_table_len{
+        return -1;
+    }else{
+        if let Some(file) = &inner.fd_table[_fd]{
+            file.get_stats(st);
+            return 0;
+        }else{
+            return -1;
+        }
+    }
+
 }
 
 /// YOUR JOB: Implement linkat.
@@ -90,7 +112,10 @@ pub fn sys_linkat(_old_name: *const u8, _new_name: *const u8) -> isize {
         "kernel:pid[{}] sys_linkat NOT IMPLEMENTED",
         current_task().unwrap().pid.0
     );
-    -1
+    let old_name = translated_str(current_user_token(), _old_name);
+    let new_name = translated_str(current_user_token(), _new_name);
+
+    linkat(&old_name, &new_name)
 }
 
 /// YOUR JOB: Implement unlinkat.
@@ -99,5 +124,7 @@ pub fn sys_unlinkat(_name: *const u8) -> isize {
         "kernel:pid[{}] sys_unlinkat NOT IMPLEMENTED",
         current_task().unwrap().pid.0
     );
-    -1
+
+    let name = translated_str(current_user_token(), _name);
+    unlinkat(&name)
 }

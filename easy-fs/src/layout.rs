@@ -86,6 +86,8 @@ pub struct DiskInode {
     pub indirect1: u32,
     pub indirect2: u32,
     type_: DiskInodeType,
+    /// 多个目录指向同一个文件节点
+    ref_cnt:usize,
 }
 
 impl DiskInode {
@@ -97,6 +99,7 @@ impl DiskInode {
         self.indirect1 = 0;
         self.indirect2 = 0;
         self.type_ = type_;
+        self.ref_cnt=1;
     }
     /// Whether this inode is a directory
     pub fn is_dir(&self) -> bool {
@@ -107,6 +110,21 @@ impl DiskInode {
     pub fn is_file(&self) -> bool {
         self.type_ == DiskInodeType::File
     }
+
+    ////
+    pub fn stat_mode(&self) -> usize{
+        match self.type_{
+            DiskInodeType::File => 1,
+            DiskInodeType::Directory => 2,
+            _ => 0,
+        }
+    }
+    ///
+    pub fn stat_nlink(&self) -> usize{
+        self.ref_cnt
+    }
+
+
     /// Return block number correspond to size.
     pub fn data_blocks(&self) -> u32 {
         Self::_data_blocks(self.size)
@@ -386,6 +404,18 @@ impl DiskInode {
             start = end_current_block;
         }
         write_size
+    }
+
+    pub fn add_ref(&mut self){
+        self.ref_cnt += 1;
+    }
+
+    pub fn sub_ref(&mut self){
+        self.ref_cnt -= 1;
+    }
+
+    pub fn ref_is_zero(&self) -> bool{
+        self.ref_cnt == 0
     }
 }
 /// A directory entry
