@@ -118,7 +118,7 @@ pub fn add_syscall_times(id:usize){
 }
 
 /// get syscall times array
-pub fn get_syscall_times() -> [u32;MAX_SYSCALL_NUM]{
+pub fn get_syscall_times() -> [usize;MAX_SYSCALL_NUM]{
     let cur_task = PROCESSOR.exclusive_access().current().unwrap();
     cur_task.get_syscall_times()
 }

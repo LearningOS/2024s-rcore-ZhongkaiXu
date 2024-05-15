@@ -137,9 +137,14 @@ pub fn sys_task_info(ti: *mut TaskInfo) -> isize {
         "kernel:pid[{}] sys_task_info IMPLEMENTED",
         current_task().unwrap().pid.0
     );
+    let syscall_time = get_syscall_times();
+    let mut v:[u32;MAX_SYSCALL_NUM] = [0;MAX_SYSCALL_NUM];
+    for i in 0..MAX_SYSCALL_NUM{
+        v[i] = syscall_time[i] as u32;
+    }
     (*translated_refmut(current_user_token(), ti))=TaskInfo{
         status:TaskStatus::Running,
-        syscall_times:get_syscall_times(),
+        syscall_times:v,
         time:get_time_ms()-get_start_time(),
     };
     0
