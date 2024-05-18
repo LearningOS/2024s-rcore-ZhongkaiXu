@@ -142,8 +142,9 @@ pub fn trap_return() -> ! {
 #[no_mangle]
 pub fn trap_from_kernel() -> ! {
     use riscv::register::sepc;
+    let stval = stval::read();
     trace!("stval = {:#x}, sepc = {:#x}", stval::read(), sepc::read());
-    panic!("a trap {:?} from kernel!", scause::read().cause());
+    panic!("a trap {:?} from kernel! bad_addr:{:x}", scause::read().cause(),stval);
 }
 
 pub use context::TrapContext;

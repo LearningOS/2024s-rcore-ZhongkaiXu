@@ -2,10 +2,13 @@
 
 use super::id::TaskUserRes;
 use super::{kstack_alloc, KernelStack, ProcessControlBlock, TaskContext};
+use crate::config::MAX_LOCK_NUM;
 use crate::trap::TrapContext;
 use crate::{mm::PhysPageNum, sync::UPSafeCell};
 use alloc::sync::{Arc, Weak};
 use core::cell::RefMut;
+
+
 
 /// Task control block structure
 pub struct TaskControlBlock {
@@ -41,6 +44,15 @@ pub struct TaskControlBlockInner {
     pub task_status: TaskStatus,
     /// It is set when active exit or execution error occurs
     pub exit_code: Option<i32>,
+    /// 把二维数组分摊到具体线程
+    /// 需要的mutex资源
+    pub mutex_need:[usize;MAX_LOCK_NUM],
+    /// 需要的spin资源
+    pub sem_need:[usize;MAX_LOCK_NUM],
+    /// 已分配的mutex资源
+    pub mutex_alloc:[usize;MAX_LOCK_NUM],
+    /// 已分配的sem资源
+    pub sem_alloc:[usize;MAX_LOCK_NUM],
 }
 
 impl TaskControlBlockInner {
@@ -75,6 +87,10 @@ impl TaskControlBlock {
                     task_cx: TaskContext::goto_trap_return(kstack_top),
                     task_status: TaskStatus::Ready,
                     exit_code: None,
+                    mutex_need:[0;MAX_LOCK_NUM],
+                    sem_need:[0;MAX_LOCK_NUM],
+                    mutex_alloc:[0;MAX_LOCK_NUM],
+                    sem_alloc:[0;MAX_LOCK_NUM],
                 })
             },
         }

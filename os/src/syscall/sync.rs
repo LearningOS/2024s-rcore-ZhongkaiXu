@@ -1,7 +1,9 @@
+use crate::config::MAX_LOCK_NUM;
 use crate::sync::{Condvar, Mutex, MutexBlocking, MutexSpin, Semaphore};
 use crate::task::{block_current_and_run_next, current_process, current_task};
 use crate::timer::{add_timer, get_time_ms};
 use alloc::sync::Arc;
+use alloc::vec;
 /// sleep syscall
 pub fn sys_sleep(ms: usize) -> isize {
     trace!(
@@ -34,6 +36,7 @@ pub fn sys_mutex_create(blocking: bool) -> isize {
             .unwrap()
             .tid
     );
+    let res:usize;
     let process = current_process();
     let mutex: Option<Arc<dyn Mutex>> = if !blocking {
         Some(Arc::new(MutexSpin::new()))
@@ -49,11 +52,17 @@ pub fn sys_mutex_create(blocking: bool) -> isize {
         .map(|(id, _)| id)
     {
         process_inner.mutex_list[id] = mutex;
-        id as isize
+        res = id;
     } else {
         process_inner.mutex_list.push(mutex);
-        process_inner.mutex_list.len() as isize - 1
+        res = process_inner.mutex_list.len() - 1;
     }
+
+
+    // 创建资源
+    process_inner.mutex_available[res] += 1;
+
+    res as isize
 }
 /// mutex lock syscall
 pub fn sys_mutex_lock(mutex_id: usize) -> isize {
@@ -69,10 +78,71 @@ pub fn sys_mutex_lock(mutex_id: usize) -> isize {
             .tid
     );
     let process = current_process();
-    let process_inner = process.inner_exclusive_access();
+    let mut process_inner = process.inner_exclusive_access();
+
+    let task = current_task().unwrap();
+    let mut task_inner = task.inner_exclusive_access();
+
+    task_inner.mutex_need[mutex_id] += 1;
+
+    // 不知道为什么放到代码块里面就出错了
+    drop(task_inner);
+    drop(task);
+
+    // 死锁检测
+    if process_inner.lock_detect{
+
+        let mut work:[usize;MAX_LOCK_NUM] = process_inner.mutex_available.clone();
+        
+        let mut finish = vec![false;process_inner.tasks.len()];
+
+        loop{
+            // 本轮是否找到
+            let mut found = false;
+
+            for i in 0..process_inner.tasks.len(){
+                if finish[i]==false{
+                    let task = process_inner.get_task(i);
+                    let task_inner = task.inner_exclusive_access();
+                    
+                    if task_inner.mutex_need[mutex_id] <= work[mutex_id]{
+                        work[mutex_id] += task_inner.mutex_alloc[mutex_id];
+                        finish[i] = true;
+                        found = true;
+                    }
+
+                    drop(task_inner);
+                    drop(task);
+                }
+            }
+
+            if !found{
+                break;
+            }
+
+        }
+
+        if finish.iter().any(|&x| x==false){
+            let task = current_task().unwrap();
+            let mut task_inner = task.inner_exclusive_access();
+            task_inner.mutex_need[mutex_id] -= 1;
+            return -0xDEAD;
+        }
+
+    }
+
+    let task = current_task().unwrap();
+    let mut task_inner = task.inner_exclusive_access();
+
+
+    process_inner.mutex_available[mutex_id] -= 1;
+    task_inner.mutex_need[mutex_id] -= 1;
+    task_inner.mutex_alloc[mutex_id] += 1;
     let mutex = Arc::clone(process_inner.mutex_list[mutex_id].as_ref().unwrap());
     drop(process_inner);
     drop(process);
+    drop(task_inner);
+    drop(task);
     mutex.lock();
     0
 }
@@ -90,10 +160,19 @@ pub fn sys_mutex_unlock(mutex_id: usize) -> isize {
             .tid
     );
     let process = current_process();
-    let process_inner = process.inner_exclusive_access();
+    let mut process_inner = process.inner_exclusive_access();
+    
+    let task = current_task().unwrap();
+    let mut task_inner = task.inner_exclusive_access();
+
+    process_inner.mutex_available[mutex_id] += 1;
+    task_inner.mutex_alloc[mutex_id] -= 1;
+    
     let mutex = Arc::clone(process_inner.mutex_list[mutex_id].as_ref().unwrap());
     drop(process_inner);
     drop(process);
+    drop(task_inner);
+    drop(task);
     mutex.unlock();
     0
 }
@@ -127,6 +206,10 @@ pub fn sys_semaphore_create(res_count: usize) -> isize {
             .push(Some(Arc::new(Semaphore::new(res_count))));
         process_inner.semaphore_list.len() - 1
     };
+
+    process_inner.sem_available[id] += res_count;
+
+
     id as isize
 }
 /// semaphore up syscall
@@ -143,9 +226,18 @@ pub fn sys_semaphore_up(sem_id: usize) -> isize {
             .tid
     );
     let process = current_process();
-    let process_inner = process.inner_exclusive_access();
+    let mut process_inner = process.inner_exclusive_access();
+    
+    let task = current_task().unwrap();
+    let mut task_inner = task.inner_exclusive_access();
+    
+    process_inner.sem_available[sem_id] += 1;
+
+    task_inner.sem_alloc[sem_id] -= 1;
+    
     let sem = Arc::clone(process_inner.semaphore_list[sem_id].as_ref().unwrap());
     drop(process_inner);
+    drop(task_inner);
     sem.up();
     0
 }
@@ -164,6 +256,64 @@ pub fn sys_semaphore_down(sem_id: usize) -> isize {
     );
     let process = current_process();
     let process_inner = process.inner_exclusive_access();
+    
+    let task = current_task().unwrap();
+    let mut task_inner = task.inner_exclusive_access();
+
+    task_inner.sem_need[sem_id] += 1;
+
+    drop(task_inner);
+    drop(task);
+
+    // 死锁检测
+    if process_inner.lock_detect{
+
+        let mut work:[usize;MAX_LOCK_NUM] = process_inner.sem_available.clone();
+        
+        let mut finish = vec![false;process_inner.tasks.len()];
+
+        loop{
+            // 本轮是否找到
+            let mut found = false;
+
+            for i in 0..process_inner.tasks.len(){
+                if finish[i]==false{
+                    let task = process_inner.get_task(i);
+                    let task_inner = task.inner_exclusive_access();
+                    
+                    if task_inner.sem_need[sem_id] <= work[sem_id]{
+                        work[sem_id] += task_inner.sem_alloc[sem_id];
+                        finish[i] = true;
+                        found = true;
+                    }
+
+                    drop(task_inner);
+                    drop(task);
+                }
+            }
+
+            if !found{
+                break;
+            }
+
+        }
+
+        if finish.iter().any(|&x| x==false){
+            let task = current_task().unwrap();
+            let mut task_inner = task.inner_exclusive_access();
+            task_inner.mutex_need[sem_id] -= 1;
+            return -0xDEAD;
+        }
+
+    }    
+    let task = current_task().unwrap();
+    let mut task_inner = task.inner_exclusive_access();
+
+    task_inner.sem_need[sem_id] -= 1;
+
+    drop(task_inner);
+    drop(task);
+
     let sem = Arc::clone(process_inner.semaphore_list[sem_id].as_ref().unwrap());
     drop(process_inner);
     sem.down();
@@ -247,5 +397,14 @@ pub fn sys_condvar_wait(condvar_id: usize, mutex_id: usize) -> isize {
 /// YOUR JOB: Implement deadlock detection, but might not all in this syscall
 pub fn sys_enable_deadlock_detect(_enabled: usize) -> isize {
     trace!("kernel: sys_enable_deadlock_detect NOT IMPLEMENTED");
+    
+    if _enabled==1{
+        current_process().inner_exclusive_access().lock_detect=true;
+        return 0;
+    }else if _enabled==0{
+        current_process().inner_exclusive_access().lock_detect=false;
+        return 0;
+    }
+
     -1
 }
