@@ -105,10 +105,16 @@ pub fn sys_mutex_lock(mutex_id: usize) -> isize {
                     let task = process_inner.get_task(i);
                     let task_inner = task.inner_exclusive_access();
                     
-                    if task_inner.mutex_need[mutex_id] <= work[mutex_id]{
-                        work[mutex_id] += task_inner.mutex_alloc[mutex_id];
+                    let cannot_satisfy = work.iter().enumerate().any(|(mux,num)|{
+                        task_inner.mutex_need[mux] > *num
+                    });
+
+                    if !cannot_satisfy{
                         finish[i] = true;
-                        found = true;
+                        work.iter_mut().enumerate().for_each(|(pos,ptr)|{
+                            *ptr += task_inner.mutex_alloc[pos];
+                        });
+                        found=true;
                     }
 
                     drop(task_inner);
@@ -255,7 +261,7 @@ pub fn sys_semaphore_down(sem_id: usize) -> isize {
             .tid
     );
     let process = current_process();
-    let process_inner = process.inner_exclusive_access();
+    let mut process_inner = process.inner_exclusive_access();
     
     let task = current_task().unwrap();
     let mut task_inner = task.inner_exclusive_access();
@@ -281,10 +287,16 @@ pub fn sys_semaphore_down(sem_id: usize) -> isize {
                     let task = process_inner.get_task(i);
                     let task_inner = task.inner_exclusive_access();
                     
-                    if task_inner.sem_need[sem_id] <= work[sem_id]{
-                        work[sem_id] += task_inner.sem_alloc[sem_id];
-                        finish[i] = true;
-                        found = true;
+                    let cannot_satisfy = work.iter().enumerate().any(|(a,b)|{
+                        task_inner.sem_need[a] > *b
+                    });
+
+                    if !cannot_satisfy{
+                        finish[i]=true;
+                        found=true;
+                        work.iter_mut().enumerate().for_each(|(pos,num)|{
+                            *num += task_inner.sem_alloc[pos];
+                        });
                     }
 
                     drop(task_inner);
@@ -309,7 +321,12 @@ pub fn sys_semaphore_down(sem_id: usize) -> isize {
     let task = current_task().unwrap();
     let mut task_inner = task.inner_exclusive_access();
 
-    task_inner.sem_need[sem_id] -= 1;
+
+    if process_inner.sem_available[sem_id] >0 {
+        task_inner.sem_need[sem_id] -= 1;
+        task_inner.sem_alloc[sem_id] += 1;
+        process_inner.sem_available[sem_id] -= 1;
+    }
 
     drop(task_inner);
     drop(task);
